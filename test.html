@@ -1,0 +1,259 @@
+<HTML>
+<input type='file' accept='text/plain' onchange='openFile(event)'><br>
+<img id='output'>
+<h3>VCV Random Generator Output</h3>
+<div id="words">Output</div>
+
+<table align="top">
+	<tr>
+		<th colspan="2">Generation Options</th>
+	</tr>
+
+	<tr>
+		<td>Length in words:</td>
+		<td><input type="number" id="len" size="14" value=10></td>
+	</tr>
+
+	<tr>
+		<td>Phonemes per word:</td>
+		<td><input type="number" id="pho" size="14" value=2></td>
+	</tr>
+
+	<tr>
+		<td>Chance to misconstrue:</td>
+		<td><input type="number" id="mis" size="14" value=50></td>
+		<td>%</td>
+	</tr>
+</table>
+<input type="button" onclick="regen()" value="Regenerate" />
+
+<h3>Misconstrued Input Text</h3>
+<div id="misconstruedWords">Output</div>
+<script>
+
+var processText = {
+	text : '',
+	words : new Array(),
+	uniqueWords : new Array(),
+	vcv : new Array(),
+	rand : "",
+	mis : ""
+};
+
+//Takes in file, fires off parsing of text
+var openFile = function(event) {
+	var input = event.target;
+	var reader = new FileReader();
+	reader.onload = function(){ processText.text = reader.result; regen(); };
+	reader.readAsText(input.files[0]);
+};
+
+//regenerate the list with the current set
+function regen(){
+	console.log("regen");
+	if(processText.text.length <= 1) { return; }
+	processText.words = parseText(processText.text);
+	processText.uniqueWords = parseWords(processText.words);
+	processText.vcv = parseVCV(processText.uniqueWords);
+	processText.rand = buildWords(processText.vcv, document.getElementById("len").value);
+	processText.rand = fixCase(processText.rand);
+	processText.mis = misconstrue(processText.words, processText.vcv);
+	document.getElementById("words").innerHTML = processText.rand;
+	document.getElementById("misconstruedWords").innerHTML = processText.mis;
+
+}
+
+//Break string into words (and clean them up)
+var parseText = function(words){
+	var w = words.replace(/(\r\n|\n|\r)/gm, " ");//removes new lines and carriage returns
+	w = w.replace(/"/g,""); //removes double quotes
+	w = w.replace(/'/g,""); //removes single quotes
+	w = w.replace(/[0-9]/g,""); //removes numbers
+	w = w.replace(/\uFFFD/g, ''); //removes illegal chars
+	w = w.replace(/[\])}[{(]/g, ''); //removes brackets/parenthesis
+	w = w.replace(/[<>]/g, ''); //removes angle braces
+	return w.split(" ");
+};
+
+//Collect unique words only
+var parseWords = function(words){
+	var unique = new Array();
+	for (var i=0; i<words.length; i++){
+		if (unique.indexOf(words[i]) === -1){ unique.push(words[i]); }
+	}
+	return unique;
+};
+
+//Collecting VCV sets
+var parseVCV = function(words){
+	var ret = new Array();
+	var set = new Array();
+	//loop over each word for VC or *C pairs
+	for (var i=0; i<words.length; i++){
+		set = parseWordVCV(words[i]);
+		for (var j=0; j<set.length; j++){
+			if (ret.indexOf(set[j]) === -1){ ret.push(set[j]); }
+		}
+	}
+	return ret;
+};
+
+//parse word for VCV
+var parseWordVCV = function(w){
+	var word = w.toLowerCase();
+	var vcvSet = new Array();
+	var foundV = false;
+	var foundC = false;
+	var foundVCV = false;
+	var lastV = "";
+	var pho = "";
+
+	for(var i=0; i<word.length; i++){
+		l = word.charAt(i);
+		lv = isVowel(l);
+		nlv = isVowel(word.charAt(i+1));
+
+		if (i==0 && !lv) { foundV = true; }
+		if (i==0) { pho += "-"; }
+
+		if (!foundV && !foundC && !foundVCV){
+			pho += l;
+			if (!nlv) { foundV = true; }
+		} else if(foundV && !foundC && !foundVCV){
+			pho += l;
+			if (nlv) { foundC = true; }
+		} else if(foundV && foundC && !foundVCV){
+			pho += l;
+			lastV += l;
+			if (!nlv) { foundVCV = true; }
+		}
+		
+		if(foundVCV){
+			vcvSet.push(pho);
+			foundV = false;
+			if (!nlv) { foundV = true; }
+			foundC = false;
+			foundVCV = false;
+			pho=lastV;
+			lastV = "";
+		}
+		
+	}
+	vcvSet.push(pho + "-");
+	return vcvSet;
+}
+
+//Check if char is a vowel or consonant
+var isVowel = function(lett){
+	if (lett && lett.length == 1) {
+		return /[aeiouAEIOU]/.test(lett);
+	}
+	return -1;
+}
+
+//Build random words from given VCV set
+var buildWords = function(vcv, numWords){
+	var ret = "";	
+	for(var i=0; i<numWords; i++){ 
+		ret += makeWord(vcv, Math.floor(Math.random()*document.getElementById("pho").value+1));
+		if ( i < numWords-1 ) { ret += " "; } 
+	}
+
+	if (ret.charAt(ret.length-1) !== ".") { ret += "."; }
+	if (ret.charAt(ret.length-2) === "," || ret.charAt(ret.length-2) === "?" || ret.charAt(ret.length-2) === "!"){ 
+		ret = ret.substr(0,ret.length-2) + ".";
+	}
+	return ret;
+}
+
+var makeWord = function(vcv, syllables){
+	var wordDone = false;
+	var word = "";
+	var rand = Math.floor(Math.random()*vcv.length);
+	var syllCount = 0;
+
+	var vowels = "";
+	var attempts = 1000;
+
+	while(!wordDone){
+		attempts--;
+		rand = Math.floor(Math.random()*vcv.length);
+		var w = vcv[rand];
+
+		//collect end of word vowels
+		vowels = "";
+		for(var i=word.length-1; i>=0; i--) {
+			if (isVowel(word.charAt(i))) { vowels = word.charAt(i) + vowels; }
+			else { break; }
+		}
+
+		if (syllCount == 0){
+			if (w.charAt(0) === "-" && w.charAt(w.length-1) !== "-") {
+				word += w.substring(1);
+				syllCount += 1;
+			}
+		} else if (syllCount > 0 && syllCount < syllables-1){
+			if (w.charAt(0) !== "-" && w.charAt(w.length-1) !== "-") {
+				var startVowels = "";
+				for(var i=0; i<w.length; i++) {
+					if (isVowel(w.charAt(i))) { startVowels = w.charAt(i) + startVowels; }
+					else { break; }
+				}
+
+				if (vowels === startVowels){
+					word += w.substring(startVowels.length);
+					syllCount += 1;
+				}
+			}
+		} else {
+			if (w.charAt(w.length-1) === "-" && w.charAt(0) !== "-") {
+				var startVowels = "";
+				for(var i=0; i<w.length; i++) {
+					if (isVowel(w.charAt(i))) { startVowels = w.charAt(i) + startVowels; }
+					else { break; }
+				}
+				
+				if(vowels === startVowels){
+					word += w.substring(startVowels.length, w.length-1);
+					syllCount += 1;
+					wordDone = true;
+				}
+			}
+		}
+		if (attempts <= 0) { word = ""; syllCount = 0; attempts = 1000; vowels = ""; } //reset, try again
+	}
+	word = word.replace(/-/g,""); //removes hyphens if the syllables were set to a negative number
+	return word;
+}
+
+var fixCase = function(input) {
+	var lowercaseBefore = true;
+    	input = ( input === undefined || input === null ) ? '' : input;
+    	if (lowercaseBefore) { input = input.toLowerCase(); }
+    	var ret = input.toString().replace( /(^|\. *)([a-z])/g, function(match, separator, char) {
+        	return separator + char.toUpperCase();
+    	});
+	ret = ret.replace(/([!?.]\s+)([a-z])/g, function(m, $1, $2) {return $1+$2.toUpperCase();});
+
+	return ret;
+}
+
+var misconstrue = function(words, vcv){
+	var temp = words;
+	var ret = ""
+	for(var i=0; i<temp.length; i++){
+		var misconstrued = false;
+		if (Math.random() < document.getElementById("mis").value/100){
+			misconstrued = true;
+		}
+		if(misconstrued){
+			temp[i] = makeWord(vcv, document.getElementById("pho").value);
+		}
+		ret += temp[i] + " ";
+	}
+	return fixCase(ret);
+}
+
+</script>
+</DIV>
+</HTML>
